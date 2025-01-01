@@ -1,0 +1,140 @@
+local TweenService = game:GetService("TweenService")
+local player = game.Players.LocalPlayer
+local camera = game.Workspace.CurrentCamera
+
+local coalStorageFolder = workspace.MiscellaneousStorage.CoalStorage
+local tweenTime = 1  -- Tween time set to 0.3 seconds for smooth transition
+local searchRadius = 50000897
+local coalCollected = 0
+local hrp
+local antiAFKTime = 5  -- Time interval for anti-AFK actions (seconds)
+
+local function getHRP()
+    local character = player.Character or player.CharacterAdded:Wait()
+    return character:WaitForChild("HumanoidRootPart")
+end
+
+-- Function to apply ProximityPrompt properties to all existing or new coal
+local function applyCoalProximityPrompt(coal)
+    if coal:IsA("MeshPart") and coal.Name == "Coal" then
+        local attachment = coal:FindFirstChild("Attachment")
+        if attachment then
+            local proximityPrompt = attachment:FindFirstChildOfClass("ProximityPrompt")
+            if proximityPrompt then
+                -- Apply ProximityPrompt properties
+                proximityPrompt.HoldDuration = 0  -- Instant collection
+                proximityPrompt.MaxActivationDistance = 50  -- Adjust to 50
+                proximityPrompt.ActionText = "Collect Coal"  -- Custom action text
+                proximityPrompt.ObjectText = "Coal"  -- Custom object text
+                proximityPrompt.Enabled = true  -- Ensure it's enabled
+            end
+        end
+    end
+end
+
+-- Resize coal and adjust ProximityPrompt properties
+local function adjustCoal()
+    for _, coal in pairs(coalStorageFolder:GetDescendants()) do
+        applyCoalProximityPrompt(coal)  -- Apply ProximityPrompt properties
+    end
+end
+
+-- Watch for new coal being added to the workspace and apply ProximityPrompt properties
+coalStorageFolder.DescendantAdded:Connect(function(coal)
+    applyCoalProximityPrompt(coal)  -- Apply ProximityPrompt properties when coal is added
+end)
+
+-- Function to collect the closest coal and add it to the inventory
+local function collectClosestCoal()
+    local closestCoal = nil
+    local closestDistance = math.huge
+    hrp = getHRP()
+
+    -- Find the closest coal piece
+    for _, coal in pairs(coalStorageFolder:GetDescendants()) do
+        if coal:IsA("MeshPart") and coal.Name == "Coal" then
+            local distance = (hrp.Position - coal.Position).Magnitude
+            if distance < closestDistance and distance <= searchRadius then
+                closestCoal = coal
+                closestDistance = distance
+            end
+        end
+    end
+    
+    -- If closest coal is found, tween to it and collect
+    if closestCoal then
+        local targetPosition = closestCoal.Position + Vector3.new(0, 5, 0)  -- Slight hover above coal
+        local tweenInfo = TweenInfo.new(
+            tweenTime,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out
+        )
+
+        local goal = {CFrame = CFrame.new(targetPosition)}  -- Move directly to the coal's position
+        local teleportTween = TweenService:Create(hrp, tweenInfo, goal)
+
+        teleportTween:Play()
+
+        teleportTween.Completed:Connect(function()
+            -- Focus camera on the coal
+            local coalPosition = closestCoal.Position
+            local cameraLookAt = coalPosition + Vector3.new(0, 5, 0)  -- Slightly above the coal to prevent obstruction
+            camera.CFrame = CFrame.new(camera.CFrame.Position, cameraLookAt)  -- Set camera to look at the coal
+
+            local attachment = closestCoal:FindFirstChild("Attachment")
+            local proximityPrompt = attachment and attachment:FindFirstChildOfClass("ProximityPrompt")
+            
+            if proximityPrompt then
+                proximityPrompt:InputHoldBegin()  -- Simulate F being held down
+                wait(0.1)  -- Small delay to ensure collection
+                proximityPrompt:InputHoldEnd()  -- Simulate F release
+
+                -- Deduct Jolly from the player's MemoryCard
+                local memoryCard = player:FindFirstChild("MemoryCard")
+                if memoryCard and memoryCard:FindFirstChild("Christmas2024Jolly") then
+                    local jolly = memoryCard.Christmas2024Jolly
+                    memoryCard.Christmas2024Jolly = jolly - 3  -- Deduct 3 Jolly
+                    print("3 Jolly deducted! New Jolly count: " .. memoryCard.Christmas2024Jolly)
+                end
+
+                coalCollected = coalCollected + 1
+                closestCoal:Destroy()  -- Destroy the coal after collection
+            end
+        end)
+    end
+end
+
+-- Anti-AFK system
+local function antiAFK()
+    while true do
+        wait(antiAFKTime)  -- Wait for the set time interval (5 seconds)
+        
+        -- Simulate some action to keep the player active
+        -- Rotate the character slightly to prevent AFK detection
+        local rotation = hrp.CFrame * CFrame.Angles(0, math.rad(1), 0)
+        hrp.CFrame = rotation
+        
+        -- Slight camera movement to prevent AFK
+        local cameraPos = camera.CFrame.Position
+        camera.CFrame = CFrame.new(cameraPos + Vector3.new(0.1, 0, 0))  -- Small camera movement
+    end
+end
+
+-- Continuously collect coal every 0.3 seconds
+local function startCollecting()
+    adjustCoal()  -- Resize coal and adjust proximity prompts
+    while true do
+        collectClosestCoal()  -- Call the coal collection function
+        wait(0.3)  -- Wait for 0.3 seconds before executing again
+    end
+end
+
+player.CharacterAdded:Connect(function()
+    hrp = getHRP()
+    startCollecting()  -- Start collecting when character loads
+    antiAFK()  -- Start anti-AFK function
+end)
+
+hrp = getHRP()
+startCollecting()  -- Start collecting immediately when script executes
+antiAFK()  -- Start anti-AFK function immediately
